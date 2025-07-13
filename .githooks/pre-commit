@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""
+Git pre-commit hook to check for secrets in staged files
+"""
+import sys
+import subprocess
+import os
+from pathlib import Path
+
+# Add the project root to Python path to import security_utils
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+try:
+    from security_utils import detect_secrets
+except ImportError:
+    print("ERROR: Could not import security_utils. Make sure you're in the correct directory.")
+    sys.exit(1)
+
+# ANSI color codes
+RED = '\033[91m'
+GREEN = '\033[92m'
+YELLOW = '\033[93m'
+BLUE = '\033[94m'
+RESET = '\033[0m'
+BOLD = '\033[1m'
+
+def get_staged_files():
+    """Get list of staged files"""
+    try:
+        output = subprocess.check_output(
+            ['git', 'diff', '--cached', '--name-only'],
+            text=True
+        )
+        return [f.strip() for f in output.split('\n') if f.strip()]
+    except subprocess.CalledProcessError:
+        return []
+
+def get_staged_content(filename):
+    """Get the staged content of a file"""
+    try:
+        content = subprocess.check_output(
+            ['git', 'show', f':{filename}'],
+            text=True
+        )
+        return content
+    except subprocess.CalledProcessError:
+        return ""
+
+def check_file_for_secrets(filename):
+    """Check a single file for secrets"""
+    # Skip binary files
+    if filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip', '.tar', '.gz')):
+        return []
+    
+    # Skip .env files (they're supposed to have secrets)
+    if filename == '.env' or filename.endswith('/.env'):
+        return []
+    
+    content = get_staged_content(filename)
+    if not content:
+        return []
+    
+    secrets_found = []
+    
+    # Detect secrets in the content
+    for line_num, line in enumerate(content.split('\n'), 1):
+        secrets = detect_secrets(line)
+        
+        for secret_text, secret_type, category in secrets:
+            secrets_found.append({
+                'file': filename,
+                'line': line_num,
+                'secret_type': secret_type,
+                'category': category,
+                'preview': secret_text[:20] + '...' if len(secret_text) > 20 else secret_text
+            })
+    
+    return secrets_found
+
+def main():
+    """Main hook function"""
+    print(f"\n{BLUE}🔍 Checking staged files for secrets...{RESET}")
+    
+    # Get staged files
+    staged_files = get_staged_files()
+    
+    if not staged_files:
+        print(f"{GREEN}✓ No staged files to check{RESET}")
+        return 0
+    
+    print(f"Checking {len(staged_files)} file(s)...")
+    
+    # Check each file
+    all_secrets = []
+    for filename in staged_files:
+        secrets = check_file_for_secrets(filename)
+        all_secrets.extend(secrets)
+    
+    # Report results
+    if not all_secrets:
+        print(f"{GREEN}✓ No secrets detected in staged files{RESET}")
+        return 0
+    
+    # Secrets found - show details
+    print(f"\n{RED}{BOLD}⚠️  SECRETS DETECTED - Commit blocked!{RESET}")
+    print(f"\nFound {len(all_secrets)} potential secret(s) in staged files:\n")
+    
+    # Group by file
+    by_file = {}
+    for secret in all_secrets:
+        filename = secret['file']
+        if filename not in by_file:
+            by_file[filename] = []
+        by_file[filename].append(secret)
+    
+    # Display secrets by file
+    for filename, secrets in by_file.items():
+        print(f"{YELLOW}File: {filename}{RESET}")
+        for secret in secrets:
+            print(f"  Line {secret['line']}: {secret['secret_type']} ({secret['category']})")
+            print(f"    Preview: {secret['preview']}")
+        print()
+    
+    print(f"{RED}Please remove these secrets before committing!{RESET}")
+    print("\nOptions:")
+    print("1. Remove the secrets from the files")
+    print("2. Add the files to .gitignore if they shouldn't be tracked")
+    print("3. Use environment variables instead of hardcoded secrets")
+    print(f"\n{YELLOW}To bypass this check (NOT RECOMMENDED), use: git commit --no-verify{RESET}")
+    
+    return 1
+
+if __name__ == '__main__':
+    sys.exit(main())

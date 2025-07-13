@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""
+Git pre-push hook to check for secrets in commits before pushing
+"""
+import sys
+import subprocess
+import os
+import re
+from pathlib import Path
+
+# Add the project root to Python path to import security_utils
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+try:
+    from security_utils import detect_secrets
+except ImportError:
+    print("ERROR: Could not import security_utils. Make sure you're in the correct directory.")
+    sys.exit(1)
+
+# ANSI color codes
+RED = '\033[91m'
+GREEN = '\033[92m'
+YELLOW = '\033[93m'
+BLUE = '\033[94m'
+RESET = '\033[0m'
+BOLD = '\033[1m'
+
+def get_commits_to_push():
+    """Get list of commits that would be pushed"""
+    try:
+        # Get the remote and branch
+        remote = sys.argv[1] if len(sys.argv) > 1 else 'origin'
+        
+        # Get current branch
+        current_branch = subprocess.check_output(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+            text=True
+        ).strip()
+        
+        # Get commits that would be pushed
+        try:
+            # Get the range of commits to be pushed
+            remote_branch = f"{remote}/{current_branch}"
+            commits = subprocess.check_output(
+                ['git', 'rev-list', f'{remote_branch}..HEAD'],
+                text=True,
+                stderr=subprocess.DEVNULL
+            ).strip().split('\n')
+            
+            # Filter out empty strings
+            commits = [c for c in commits if c]
+            
+        except subprocess.CalledProcessError:
+            # Remote branch doesn't exist, get all commits
+            commits = subprocess.check_output(
+                ['git', 'rev-list', 'HEAD'],
+                text=True
+            ).strip().split('\n')
+            commits = [c for c in commits if c]
+        
+        return commits
+        
+    except subprocess.CalledProcessError as e:
+        print(f"Error getting commits: {e}")
+        return []
+
+def get_commit_diff(commit_hash):
+    """Get the diff for a specific commit"""
+    try:
+        diff = subprocess.check_output(
+            ['git', 'show', '--format=', commit_hash],
+            text=True
+        )
+        return diff
+    except subprocess.CalledProcessError:
+        return ""
+
+def check_commit_for_secrets(commit_hash):
+    """Check a single commit for secrets"""
+    diff = get_commit_diff(commit_hash)
+    
+    # Get commit info
+    commit_info = subprocess.check_output(
+        ['git', 'show', '--no-patch', '--format=%h %s', commit_hash],
+        text=True
+    ).strip()
+    
+    secrets_found = []
+    
+    # Check each line in the diff
+    for line_num, line in enumerate(diff.split('\n'), 1):
+        # Only check added lines (starting with +)
+        if not line.startswith('+'):
+            continue
+        
+        # Remove the + prefix
+        content = line[1:]
+        
+        # Skip binary files
+        if 'Binary files' in content:
+            continue
+            
+        # Detect secrets in the line
+        secrets = detect_secrets(content)
+        
+        for secret_text, secret_type, category in secrets:
+            secrets_found.append({
+                'commit': commit_hash,
+                'commit_info': commit_info,
+                'line': line_num,
+                'secret_type': secret_type,
+                'category': category,
+                'preview': secret_text[:20] + '...' if len(secret_text) > 20 else secret_text
+            })
+    
+    return secrets_found
+
+def main():
+    """Main hook function"""
+    print(f"\n{BLUE}🔍 Checking commits for secrets before push...{RESET}")
+    
+    # Get commits to be pushed
+    commits = get_commits_to_push()
+    
+    if not commits:
+        print(f"{GREEN}✓ No commits to check{RESET}")
+        return 0
+    
+    print(f"Checking {len(commits)} commit(s)...")
+    
+    # Check each commit
+    all_secrets = []
+    for commit in commits:
+        secrets = check_commit_for_secrets(commit)
+        all_secrets.extend(secrets)
+    
+    # Report results
+    if not all_secrets:
+        print(f"{GREEN}✓ No secrets detected in {len(commits)} commit(s){RESET}")
+        return 0
+    
+    # Secrets found - show details
+    print(f"\n{RED}{BOLD}⚠️  SECRETS DETECTED - Push blocked!{RESET}")
+    print(f"\nFound {len(all_secrets)} potential secret(s) in your commits:\n")
+    
+    # Group by commit
+    by_commit = {}
+    for secret in all_secrets:
+        commit_info = secret['commit_info']
+        if commit_info not in by_commit:
+            by_commit[commit_info] = []
+        by_commit[commit_info].append(secret)
+    
+    # Display secrets by commit
+    for commit_info, secrets in by_commit.items():
+        print(f"{YELLOW}Commit: {commit_info}{RESET}")
+        for secret in secrets:
+            print(f"  - {secret['secret_type']} ({secret['category']}): {secret['preview']}")
+        print()
+    
+    print(f"{RED}Please remove these secrets before pushing!{RESET}")
+    print("\nOptions:")
+    print("1. Fix the commits with secrets using 'git rebase -i' or 'git commit --amend'")
+    print("2. Use the synchronization tool with --no-redaction if these are test values")
+    print("3. Add the files to .gitignore if they shouldn't be tracked")
+    print(f"\n{YELLOW}To bypass this check (NOT RECOMMENDED), use: git push --no-verify{RESET}")
+    
+    return 1
+
+if __name__ == '__main__':
+    sys.exit(main())
