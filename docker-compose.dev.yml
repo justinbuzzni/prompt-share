@@ -1,0 +1,53 @@
+# Development Docker Compose Configuration
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: prompt-share-mongodb-dev
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-password}
+      MONGO_INITDB_DATABASE: ${MONGODB_DATABASE:-prompt_share}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_dev_data:/data/db
+      - ./docker/mongodb/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - prompt-share-dev-network
+
+  # Python Backend API (Development)
+  backend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: prompt-share-backend-dev
+    restart: unless-stopped
+    environment:
+      - MONGODB_HOST=mongodb:27017
+      - MONGODB_URL=mongodb://${MONGODB_USER:-admin}:${MONGODB_PASSWORD:-password}@mongodb:27017/${MONGODB_DATABASE:-prompt_share}?authSource=admin
+      - MONGODB_USER=${MONGODB_USER:-admin}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD:-password}
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-prompt_share}
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${CLAUDE_DATA_PATH:-~/.claude}:/home/appuser/.claude:ro
+      - .:/app/source:ro  # Mount source code for development
+    depends_on:
+      - mongodb
+    networks:
+      - prompt-share-dev-network
+    command: ["python", "-u", "api_server.py"]
+
+volumes:
+  mongodb_dev_data:
+    driver: local
+
+networks:
+  prompt-share-dev-network:
+    driver: bridge

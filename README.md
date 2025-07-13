@@ -26,13 +26,69 @@ A comprehensive tool for synchronizing, managing, and viewing Claude AI conversa
 
 ## 🚀 Quick Start
 
-### 1. Clone the Repository
+### Option 1: Docker Compose (Recommended)
+
+#### Prerequisites
+- Docker and Docker Compose installed
+- Claude Desktop App with conversation data
+
+#### Steps
+1. **Clone the Repository**
 ```bash
-git clone https://github.com/your-username/prompt-share.git
+git clone https://github.com/justinbuzzni/prompt-share.git
 cd prompt-share
 ```
 
-### 2. Set Up Environment Variables
+2. **Set Up Environment**
+```bash
+cp .env.example .env
+# Edit .env file with your configuration
+```
+
+3. **Start with Docker**
+```bash
+# Production mode
+./docker-start.sh
+
+# Development mode
+./docker-start.sh --dev
+
+# With rebuild
+./docker-start.sh --rebuild
+```
+
+#### Services
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000  
+- **MongoDB**: localhost:27017
+
+#### Docker Commands
+```bash
+# Stop services
+docker-compose down
+
+# View logs
+docker-compose logs -f
+
+# Rebuild and start
+docker-compose up --build
+```
+
+### Option 2: Local Development
+
+#### Prerequisites
+- Python 3.8+
+- Node.js 16+
+- MongoDB 4.4+
+
+#### Steps
+1. **Clone the Repository**
+```bash
+git clone https://github.com/justinbuzzni/prompt-share.git
+cd prompt-share
+```
+
+2. **Set Up Environment Variables**
 Create a `.env` file in the project root:
 ```env
 MONGODB_URL=localhost:27017
@@ -41,7 +97,7 @@ MONGODB_PASSWORD=your_password
 MONGODB_DATABASE=claude_prompts
 ```
 
-### 3. Install Dependencies
+3. **Install Dependencies**
 
 **Python dependencies:**
 ```bash
@@ -59,7 +115,7 @@ npm install
 ./setup_hooks.sh
 ```
 
-### 4. Run the Synchronization
+4. **Run the Synchronization**
 ```bash
 # Sync all conversations
 python claude_sync.py
@@ -71,7 +127,7 @@ python claude_sync.py -o buzzni
 python claude_sync.py -r prompt-share hsmoa
 ```
 
-### 5. Start the Web Viewer
+5. **Start the Web Viewer**
 
 **Backend API Server:**
 ```bash
