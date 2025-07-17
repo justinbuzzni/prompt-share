@@ -11,8 +11,10 @@ from bson import ObjectId
 from dotenv import load_dotenv
 import logging
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils import extract_project_info
+import time
+import hashlib
 
 # Load environment variables
 load_dotenv()
@@ -45,6 +47,39 @@ try:
 except Exception as e:
     logger.error(f"Failed to connect to MongoDB: {e}")
     db = None
+
+# Simple in-memory cache
+cache = {}
+CACHE_DURATION = 300  # 5 minutes
+
+def get_cache_key(endpoint: str, params: dict = None) -> str:
+    """Generate cache key from endpoint and parameters"""
+    if params:
+        params_str = '&'.join([f"{k}={v}" for k, v in sorted(params.items())])
+        return f"{endpoint}?{params_str}"
+    return endpoint
+
+def get_from_cache(cache_key: str):
+    """Get data from cache if not expired"""
+    if cache_key in cache:
+        data, timestamp = cache[cache_key]
+        if time.time() - timestamp < CACHE_DURATION:
+            return data
+        else:
+            del cache[cache_key]
+    return None
+
+def set_cache(cache_key: str, data):
+    """Set data to cache with timestamp"""
+    cache[cache_key] = (data, time.time())
+
+def clear_cache():
+    """Clear expired cache entries"""
+    current_time = time.time()
+    expired_keys = [k for k, (_, timestamp) in cache.items() 
+                   if current_time - timestamp >= CACHE_DURATION]
+    for key in expired_keys:
+        del cache[key]
 
 
 @asynccontextmanager
@@ -210,14 +245,30 @@ async def health_check():
     """Health check endpoint"""
     return HealthResponse(status="healthy", database=MONGODB_DATABASE)
 
+@app.post("/api/cache/clear")
+async def clear_api_cache():
+    """Clear API cache"""
+    clear_cache()
+    return {"message": "Cache cleared successfully"}
+
 
 @app.get("/api/projects/grouped", response_model=List[ProjectGroupResponse])
-async def get_projects_grouped():
+async def get_projects_grouped(
+    limit: int = Query(default=50, ge=1, le=200, description="Number of projects to return"),
+    skip: int = Query(default=0, ge=0, description="Number of projects to skip")
+):
     """Get projects grouped by project name"""
     if db is None:
         raise HTTPException(status_code=503, detail="Database connection not available")
+    
+    # Check cache first
+    cache_key = get_cache_key("projects_grouped", {"limit": limit, "skip": skip})
+    cached_result = get_from_cache(cache_key)
+    if cached_result:
+        return cached_result
+    
     try:
-        projects = list(db.projects.find().sort('updated_at', -1))
+        projects = list(db.projects.find().sort('updated_at', -1).skip(skip).limit(limit))
         
         # Group projects by extracted project name
         grouped = {}
@@ -239,12 +290,16 @@ async def get_projects_grouped():
                     'last_updated': project['updated_at']
                 }
             
-            # Add session and message counts
-            session_count = db.sessions.count_documents({'project_id': project['id']})
-            message_count = db.messages.count_documents({'project_id': project['id']})
-            
-            # Get last conversation date
-            last_conversation = get_last_conversation_date(project['id'], db)
+            # Use cached statistics if available, otherwise calculate
+            if 'session_count' in project and 'message_count' in project:
+                session_count = project['session_count']
+                message_count = project['message_count']
+                last_conversation = project.get('last_conversation_date')
+            else:
+                # Fallback to real-time calculation
+                session_count = db.sessions.count_documents({'project_id': project['id']})
+                message_count = db.messages.count_documents({'project_id': project['id']})
+                last_conversation = get_last_conversation_date(project['id'], db)
             
             # Add project metadata
             project['sessionCount'] = session_count
@@ -275,6 +330,9 @@ async def get_projects_grouped():
         
         result.sort(key=lambda x: x['last_updated'], reverse=True)
         
+        # Cache the result
+        set_cache(cache_key, result)
+        
         return result
     except Exception as e:
         logger.error(f"Error fetching grouped projects: {e}")
@@ -282,22 +340,38 @@ async def get_projects_grouped():
 
 
 @app.get("/api/projects", response_model=List[ProjectResponse])
-async def get_projects():
+async def get_projects(
+    limit: int = Query(default=50, ge=1, le=200, description="Number of projects to return"),
+    skip: int = Query(default=0, ge=0, description="Number of projects to skip")
+):
     """Get all projects"""
     if db is None:
         raise HTTPException(status_code=503, detail="Database connection not available")
+    
+    # Check cache first
+    cache_key = get_cache_key("projects", {"limit": limit, "skip": skip})
+    cached_result = get_from_cache(cache_key)
+    if cached_result:
+        return cached_result
+    
     try:
-        projects = list(db.projects.find().sort('updated_at', -1))
+        projects = list(db.projects.find().sort('updated_at', -1).skip(skip).limit(limit))
         
         # Add session count, message count, and last conversation date for each project
         for project in projects:
-            session_count = db.sessions.count_documents({'project_id': project['id']})
-            message_count = db.messages.count_documents({'project_id': project['id']})
+            # Use cached statistics if available, otherwise calculate
+            if 'session_count' in project and 'message_count' in project:
+                session_count = project['session_count']
+                message_count = project['message_count']
+                last_conversation = project.get('last_conversation_date')
+            else:
+                # Fallback to real-time calculation
+                session_count = db.sessions.count_documents({'project_id': project['id']})
+                message_count = db.messages.count_documents({'project_id': project['id']})
+                last_conversation = get_last_conversation_date(project['id'], db)
+            
             project['sessionCount'] = session_count
             project['messageCount'] = message_count
-            
-            # Get last conversation date
-            last_conversation = get_last_conversation_date(project['id'], db)
             project['last_conversation_date'] = last_conversation
             
             serialize_doc(project)
@@ -307,6 +381,9 @@ async def get_projects():
             key=lambda p: p.get('last_conversation_date') or p.get('updated_at'), 
             reverse=True
         )
+        
+        # Cache the result
+        set_cache(cache_key, projects)
         
         return projects
     except Exception as e:

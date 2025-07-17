@@ -14,6 +14,8 @@ import {
 import { Search, FolderOpen, Message, ViewList, ViewModule } from '@mui/icons-material';
 import { motion, AnimatePresence } from 'framer-motion';
 import ProjectCard from '../../components/ProjectCard/ProjectCard';
+import ProjectCardSkeleton from '../../components/ProjectCardSkeleton/ProjectCardSkeleton';
+import ProjectGroupSkeleton from '../../components/ProjectGroupSkeleton/ProjectGroupSkeleton';
 import { projectApi, Project, ProjectGroup } from '../../services/api';
 
 const Projects: React.FC = () => {
@@ -157,8 +159,20 @@ const Projects: React.FC = () => {
       </motion.div>
 
       {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-          <CircularProgress size={60} />
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {viewMode === 'flat' ? (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' }, gap: 3 }}>
+              {Array.from({ length: 6 }).map((_, index) => (
+                <ProjectCardSkeleton key={index} />
+              ))}
+            </Box>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <ProjectGroupSkeleton key={index} />
+              ))}
+            </Box>
+          )}
         </Box>
       ) : viewMode === 'flat' ? (
         <AnimatePresence mode="wait">

@@ -393,6 +393,53 @@ class ClaudeSyncManager:
         except Exception as e:
             logger.error(f"Failed to sync project {project.id}: {e}")
             return False
+    
+    def update_project_statistics(self, project_id: str) -> bool:
+        """Update project statistics after all sessions are synced"""
+        try:
+            # Count sessions for this project
+            session_count = self.sessions_collection.count_documents({"project_id": project_id})
+            
+            # Count messages for this project
+            message_count = self.messages_collection.count_documents({"project_id": project_id})
+            
+            # Get the most recent message timestamp
+            latest_message = self.messages_collection.find_one(
+                {"project_id": project_id, "timestamp": {"$ne": None}},
+                {"timestamp": 1},
+                sort=[("timestamp", -1)]
+            )
+            
+            # If no message timestamp, try session timestamp
+            if not latest_message:
+                latest_session = self.sessions_collection.find_one(
+                    {"project_id": project_id, "message_timestamp": {"$ne": None}},
+                    {"message_timestamp": 1},
+                    sort=[("message_timestamp", -1)]
+                )
+                last_conversation_date = latest_session.get("message_timestamp") if latest_session else None
+            else:
+                last_conversation_date = latest_message.get("timestamp")
+            
+            # Update project with cached statistics
+            update_data = {
+                "session_count": session_count,
+                "message_count": message_count,
+                "last_conversation_date": last_conversation_date,
+                "stats_updated_at": datetime.now()
+            }
+            
+            self.projects_collection.update_one(
+                {"id": project_id},
+                {"$set": update_data}
+            )
+            
+            logger.info(f"Updated statistics for project {project_id}: {session_count} sessions, {message_count} messages")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update statistics for project {project_id}: {e}")
+            return False
 
     def sync_session_to_mongodb(self, session: Session) -> bool:
         """Sync a single session and its messages to MongoDB"""
@@ -477,6 +524,9 @@ class ClaudeSyncManager:
                             stats["errors"].append(
                                 f"Failed to sync session {session.id}"
                             )
+                    
+                    # Update project statistics after all sessions are synced
+                    self.update_project_statistics(project.id)
                 else:
                     stats["errors"].append(f"Failed to sync project {project.id}")
 
