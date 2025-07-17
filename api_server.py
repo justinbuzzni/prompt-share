@@ -196,6 +196,47 @@ def serialize_doc(doc):
         doc['_id'] = str(doc['_id'])
     return doc
 
+def parse_datetime(date_value):
+    """Parse datetime from various formats"""
+    if date_value is None:
+        return None
+    
+    if isinstance(date_value, datetime):
+        return date_value
+    
+    if isinstance(date_value, str):
+        try:
+            # Try ISO format first
+            return datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+        except ValueError:
+            try:
+                # Try alternative formats
+                return datetime.strptime(date_value, '%Y-%m-%dT%H:%M:%S.%f')
+            except ValueError:
+                logger.warning(f"Could not parse datetime: {date_value}")
+                return None
+    
+    return None
+
+def safe_datetime_comparison(date1, date2):
+    """Safely compare two datetime values that might be strings or datetime objects"""
+    parsed_date1 = parse_datetime(date1)
+    parsed_date2 = parse_datetime(date2)
+    
+    if parsed_date1 is None and parsed_date2 is None:
+        return 0
+    if parsed_date1 is None:
+        return -1
+    if parsed_date2 is None:
+        return 1
+    
+    if parsed_date1 > parsed_date2:
+        return 1
+    elif parsed_date1 < parsed_date2:
+        return -1
+    else:
+        return 0
+
 
 def get_last_conversation_date(project_id: str, db) -> Optional[datetime]:
     """Get the most recent message timestamp for a project"""
@@ -315,7 +356,7 @@ async def get_projects_grouped(
             grouped[project_name]['total_messages'] += message_count
             
             # Update last_updated to the most recent
-            if project['updated_at'] > grouped[project_name]['last_updated']:
+            if safe_datetime_comparison(project['updated_at'], grouped[project_name]['last_updated']) > 0:
                 grouped[project_name]['last_updated'] = project['updated_at']
         
         # Convert to list and sort by last updated
@@ -324,11 +365,11 @@ async def get_projects_grouped(
         # Sort workspaces within each group by last conversation date
         for group in result:
             group['workspaces'].sort(
-                key=lambda w: w.get('last_conversation_date') or w.get('updated_at'), 
+                key=lambda w: parse_datetime(w.get('last_conversation_date')) or parse_datetime(w.get('updated_at')) or datetime.min, 
                 reverse=True
             )
         
-        result.sort(key=lambda x: x['last_updated'], reverse=True)
+        result.sort(key=lambda x: parse_datetime(x['last_updated']) or datetime.min, reverse=True)
         
         # Cache the result
         set_cache(cache_key, result)
@@ -378,7 +419,7 @@ async def get_projects(
         
         # Sort projects by last conversation date (most recent first)
         projects.sort(
-            key=lambda p: p.get('last_conversation_date') or p.get('updated_at'), 
+            key=lambda p: parse_datetime(p.get('last_conversation_date')) or parse_datetime(p.get('updated_at')) or datetime.min, 
             reverse=True
         )
         
