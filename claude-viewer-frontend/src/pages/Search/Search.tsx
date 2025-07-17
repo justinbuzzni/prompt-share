@@ -121,7 +121,7 @@ const Search: React.FC = () => {
     return text.replace(/<em>/g, '<mark>').replace(/<\/em>/g, '</mark>');
   };
 
-  const getMessageTypeColor = (type: string) => {
+  const getMessageTypeColor = (type: string | undefined) => {
     switch (type) {
       case 'user':
         return 'primary';
