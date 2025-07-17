@@ -6,3 +6,4 @@ pathlib==1.0.1
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
+elasticsearch==8.11.0

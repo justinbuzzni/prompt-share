@@ -1,11 +1,13 @@
 import React from 'react';
-import { Box, Container, IconButton, Typography, useTheme } from '@mui/material';
+import { Box, Container, IconButton, Typography, useTheme, Button } from '@mui/material';
 import { motion } from 'framer-motion';
-import { AutoAwesome, GitHub } from '@mui/icons-material';
-import { Outlet } from 'react-router-dom';
+import { AutoAwesome, GitHub, Search, Home } from '@mui/icons-material';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 
 const Layout: React.FC = () => {
   const theme = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   return (
     <Box
@@ -101,18 +103,46 @@ const Layout: React.FC = () => {
                 Claude Viewer
               </Typography>
             </Box>
-            <IconButton
-              href="https://github.com"
-              target="_blank"
-              sx={{
-                color: theme.palette.text.secondary,
-                '&:hover': {
-                  color: theme.palette.primary.main,
-                },
-              }}
-            >
-              <GitHub />
-            </IconButton>
+            
+            {/* Navigation */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Button
+                startIcon={<Home />}
+                onClick={() => navigate('/')}
+                sx={{
+                  color: location.pathname === '/' ? theme.palette.primary.main : theme.palette.text.secondary,
+                  '&:hover': {
+                    color: theme.palette.primary.main,
+                  },
+                }}
+              >
+                Projects
+              </Button>
+              <Button
+                startIcon={<Search />}
+                onClick={() => navigate('/search')}
+                sx={{
+                  color: location.pathname === '/search' ? theme.palette.primary.main : theme.palette.text.secondary,
+                  '&:hover': {
+                    color: theme.palette.primary.main,
+                  },
+                }}
+              >
+                Search
+              </Button>
+              <IconButton
+                href="https://github.com/justinbuzzni/prompt-share"
+                target="_blank"
+                sx={{
+                  color: theme.palette.text.secondary,
+                  '&:hover': {
+                    color: theme.palette.primary.main,
+                  },
+                }}
+              >
+                <GitHub />
+              </IconButton>
+            </Box>
           </Box>
         </Container>
       </Box>

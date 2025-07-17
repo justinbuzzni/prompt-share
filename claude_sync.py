@@ -28,6 +28,7 @@ from utils import (
     parse_jsonl_messages,
 )
 from security_utils import redact_message_content, scan_and_report
+from elasticsearch_client import ElasticsearchClient
 
 # Load environment variables
 load_dotenv()
@@ -62,6 +63,9 @@ class ClaudeSyncManager:
         self.selected_owners = selected_owners
         self.enable_redaction = enable_redaction
         self.redaction_stats = {}
+        
+        # Elasticsearch client
+        self.es_client = ElasticsearchClient()
 
     def connect_mongodb(self) -> bool:
         """Connect to MongoDB using environment variables"""
@@ -92,6 +96,13 @@ class ClaudeSyncManager:
             self._create_indexes()
 
             logger.info(f"Successfully connected to MongoDB database: {mongo_database}")
+            
+            # Connect to Elasticsearch
+            if self.es_client.connect():
+                logger.info("Connected to Elasticsearch successfully")
+            else:
+                logger.warning("Failed to connect to Elasticsearch - search functionality will be disabled")
+            
             return True
 
         except ConnectionFailure as e:
@@ -476,6 +487,28 @@ class ClaudeSyncManager:
                 # Bulk write messages
                 if message_operations:
                     self.messages_collection.bulk_write(message_operations)
+                
+                # Index messages in Elasticsearch
+                if self.es_client.es and session.messages:
+                    try:
+                        # Get project data for indexing
+                        project_data = self.projects_collection.find_one({"id": session.project_id})
+                        if project_data:
+                            # Prepare message data for ES indexing
+                            es_messages = []
+                            for idx, message in enumerate(session.messages):
+                                message_data = message.model_dump()
+                                message_data["_id"] = f"{session.id}_{idx}"
+                                message_data["session_id"] = session.id
+                                message_data["project_id"] = session.project_id
+                                message_data["message_index"] = idx
+                                message_data["last_synced"] = datetime.now()
+                                es_messages.append(message_data)
+                            
+                            # Bulk index to Elasticsearch
+                            self.es_client.index_messages_bulk(es_messages, project_data)
+                    except Exception as e:
+                        logger.warning(f"Failed to index messages to Elasticsearch: {e}")
 
             logger.info(
                 f"Synced session {session.id} with {len(session.messages)} messages"
@@ -543,10 +576,14 @@ class ClaudeSyncManager:
             self.close()
 
     def close(self):
-        """Close MongoDB connection"""
+        """Close MongoDB and Elasticsearch connections"""
         if self.mongo_client:
             self.mongo_client.close()
             logger.info("MongoDB connection closed")
+        
+        if self.es_client:
+            self.es_client.close()
+            logger.info("Elasticsearch connection closed")
 
 
 def get_available_repos(claude_dir: Path) -> Set[str]:

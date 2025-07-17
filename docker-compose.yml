@@ -24,6 +24,32 @@ services:
       retries: 5
       start_period: 30s
 
+  # Elasticsearch
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: prompt-share-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - cluster.name=prompt-share-cluster
+      - node.name=prompt-share-node
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - prompt-share-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   # Python Backend API
   backend:
     build:
@@ -37,6 +63,8 @@ services:
       - MONGODB_USER=${MONGODB_USER:-admin}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD:-password}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-prompt_share}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-prompt_share}
       - PYTHONUNBUFFERED=1
     ports:
       - "8000:8000"
@@ -44,6 +72,8 @@ services:
       - ${CLAUDE_DATA_PATH:-~/.claude}:/home/appuser/.claude:ro
     depends_on:
       mongodb:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     networks:
       - prompt-share-network
@@ -77,6 +107,8 @@ services:
 
 volumes:
   mongodb_data:
+    driver: local
+  elasticsearch_data:
     driver: local
 
 networks:

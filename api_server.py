@@ -13,6 +13,7 @@ import logging
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
 from utils import extract_project_info
+from elasticsearch_client import ElasticsearchClient
 import time
 import hashlib
 
@@ -51,6 +52,9 @@ except Exception as e:
 # Simple in-memory cache
 cache = {}
 CACHE_DURATION = 300  # 5 minutes
+
+# Initialize Elasticsearch client
+es_client = ElasticsearchClient()
 
 def get_cache_key(endpoint: str, params: dict = None) -> str:
     """Generate cache key from endpoint and parameters"""
@@ -93,9 +97,17 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Could not create text index: {e}")
     else:
         logger.error("MongoDB connection not available")
+    
+    # Connect to Elasticsearch
+    if es_client.connect():
+        logger.info("Connected to Elasticsearch successfully")
+    else:
+        logger.warning("Failed to connect to Elasticsearch - search functionality will be disabled")
+    
     yield
     # Shutdown
     logger.info("Shutting down...")
+    es_client.close()
 
 
 app = FastAPI(title="Claude Viewer API", version="1.0.0", lifespan=lifespan)
@@ -188,6 +200,26 @@ class ProjectGroupResponse(BaseModel):
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+
+class SearchHit(BaseModel):
+    id: str
+    score: float
+    source: Dict[str, Any]
+    highlight: Dict[str, List[str]]
+
+class SearchResponse(BaseModel):
+    total: int
+    max_score: float
+    hits: List[SearchHit]
+    took: int
+    
+class SearchFilters(BaseModel):
+    project_id: Optional[str] = None
+    session_id: Optional[str] = None
+    role: Optional[str] = None
+    project_name: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
 
 
 def serialize_doc(doc):
@@ -291,6 +323,65 @@ async def clear_api_cache():
     """Clear API cache"""
     clear_cache()
     return {"message": "Cache cleared successfully"}
+
+@app.get("/api/search", response_model=SearchResponse)
+async def search_messages(
+    q: str = Query(..., description="Search query"),
+    project_id: Optional[str] = Query(None, description="Filter by project ID"),
+    session_id: Optional[str] = Query(None, description="Filter by session ID"),
+    role: Optional[str] = Query(None, description="Filter by role (user/assistant)"),
+    project_name: Optional[str] = Query(None, description="Filter by project name"),
+    date_from: Optional[str] = Query(None, description="Filter by date from (ISO format)"),
+    date_to: Optional[str] = Query(None, description="Filter by date to (ISO format)"),
+    size: int = Query(default=20, ge=1, le=100, description="Number of results to return"),
+    from_: int = Query(default=0, ge=0, description="Starting offset", alias="from")
+):
+    """Search messages using Elasticsearch"""
+    
+    if not es_client.es:
+        raise HTTPException(status_code=503, detail="Search service not available")
+    
+    try:
+        # Build filters
+        filters = {}
+        if project_id:
+            filters["project_id"] = project_id
+        if session_id:
+            filters["session_id"] = session_id
+        if role:
+            filters["role"] = role
+        if project_name:
+            filters["project_name"] = project_name
+        if date_from:
+            filters["date_from"] = date_from
+        if date_to:
+            filters["date_to"] = date_to
+        
+        # Perform search
+        start_time = time.time()
+        results = es_client.search_messages(q, filters, size, from_)
+        took = int((time.time() - start_time) * 1000)  # Convert to milliseconds
+        
+        # Format response
+        response = SearchResponse(
+            total=results["total"],
+            max_score=results["max_score"] or 0,
+            hits=[
+                SearchHit(
+                    id=hit["id"],
+                    score=hit["score"],
+                    source=hit["source"],
+                    highlight=hit["highlight"]
+                ) for hit in results["hits"]
+            ],
+            took=took
+        )
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/projects/grouped", response_model=List[ProjectGroupResponse])

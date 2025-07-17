@@ -19,6 +19,26 @@ services:
     networks:
       - prompt-share-dev-network
 
+  # Elasticsearch (Development)
+  elasticsearch-dev:
+    image: elasticsearch:8.11.0
+    container_name: prompt-share-elasticsearch-dev
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - cluster.name=prompt-share-dev-cluster
+      - node.name=prompt-share-dev-node
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_dev_data:/usr/share/elasticsearch/data
+    networks:
+      - prompt-share-dev-network
+
   # Python Backend API (Development)
   backend-dev:
     build:
@@ -32,6 +52,8 @@ services:
       - MONGODB_USER=${MONGODB_USER:-admin}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD:-password}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-prompt_share}
+      - ELASTICSEARCH_URL=http://elasticsearch-dev:9200
+      - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-prompt_share}
       - PYTHONUNBUFFERED=1
     ports:
       - "8000:8000"
@@ -40,12 +62,15 @@ services:
       - .:/app/source:ro  # Mount source code for development
     depends_on:
       - mongodb
+      - elasticsearch-dev
     networks:
       - prompt-share-dev-network
     command: ["python", "-u", "api_server.py"]
 
 volumes:
   mongodb_dev_data:
+    driver: local
+  elasticsearch_dev_data:
     driver: local
 
 networks:

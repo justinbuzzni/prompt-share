@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:15011/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -91,7 +91,72 @@ export const sessionApi = {
   },
 };
 
+export interface SearchFilters {
+  project_id?: string;
+  session_id?: string;
+  role?: string;
+  project_name?: string;
+  date_from?: string;
+  date_to?: string;
+  size?: number;
+  from?: number;
+}
+
+export interface SearchHit {
+  id: string;
+  score: number;
+  source: {
+    id: string;
+    session_id: string;
+    project_id: string;
+    project_name: string;
+    project_path: string;
+    workspace_type: string;
+    branch_info: string;
+    message_index: number;
+    type?: string;
+    role?: string;
+    content?: string;
+    timestamp?: string;
+    created_at: string;
+    last_synced: string;
+    tags?: string[];
+    language?: string;
+    code_blocks?: Array<{
+      language: string;
+      code: string;
+    }>;
+  };
+  highlight: {
+    content?: string[];
+  };
+}
+
+export interface SearchResult {
+  id: string;
+  score: number;
+  source: SearchHit['source'];
+  highlight: SearchHit['highlight'];
+}
+
+export interface SearchResponse {
+  total: number;
+  max_score: number;
+  hits: SearchResult[];
+  took: number;
+}
+
 export const searchApi = {
+  search: async (query: string, filters: SearchFilters = {}): Promise<SearchResponse> => {
+    const params = {
+      q: query,
+      ...filters,
+    };
+    
+    const response = await api.get('/search', { params });
+    return response.data;
+  },
+
   searchMessages: async (query: string): Promise<Message[]> => {
     const response = await api.get('/search/messages', { params: { q: query } });
     return response.data;

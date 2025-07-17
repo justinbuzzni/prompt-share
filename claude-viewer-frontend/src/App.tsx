@@ -6,6 +6,7 @@ import Layout from './components/Layout/Layout';
 import Projects from './pages/Projects/Projects';
 import Sessions from './pages/Sessions/Sessions';
 import Messages from './pages/Messages/Messages';
+import Search from './pages/Search/Search';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<Projects />} />
+            <Route path="search" element={<Search />} />
             <Route path="project/:projectId" element={<Sessions />} />
             <Route path="session/:sessionId" element={<Messages />} />
           </Route>
